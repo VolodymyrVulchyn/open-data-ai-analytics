@@ -22,6 +22,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Check local environment
         run: |
           echo "Користувач: $(whoami)"
@@ -38,13 +39,12 @@ jobs:
       - name: Run module on MacBook
         run: |
           # Створюємо необхідні папки, якщо їх немає
-          mkdir -p artifacts/${{ github.event.inputs.module }}
-          mkdir -p reports/figures
+          mkdir -p data/raw data/processed reports/figures artifacts/${{ github.event.inputs.module }}
           
           echo "Запуск модуля src.${{ github.event.inputs.module }}..."
           
-          # Пакетний запуск із перенаправленням виводу в лог
-          python3 -m src.${{ github.event.inputs.module }} > artifacts/${{ github.event.inputs.module }}/selfhosted.log 2>&1
+          # Пакетний запуск із перенаправленням виводу в лог (використовуємо tee для дебагу)
+          python3 -m src.${{ github.event.inputs.module }} 2>&1 | tee artifacts/${{ github.event.inputs.module }}/selfhosted.log
           
           # Копіюємо графіки з reports у artifacts для завантаження на GitHub
           if [ -d "reports" ]; then 
@@ -53,6 +53,7 @@ jobs:
 
       # завантажую результати, щоб вони з'явилися на сайті GitHub
       - name: Upload local results
+        if: always() # завантажуємо лог навіть якщо була помилка
         uses: actions/upload-artifact@v4
         with:
           name: artifacts-macOS-${{ github.event.inputs.module }}
