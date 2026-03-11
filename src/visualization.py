@@ -47,5 +47,5 @@ plt.tight_layout()
 out2 = os.path.join(FIG_DIR, "natural_vs_migration.png")
 plt.savefig(out2, dpi=200)
 plt.close()
-
+# пулл ріквест тест
 print("Збережено графік:", out2)
