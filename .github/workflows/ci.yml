@@ -1,0 +1,84 @@
+name: CI (modules)
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      module:
+        description: "Which module to run (or 'all')"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - data_load
+          - data_quality_analysis
+          - data_research
+          - visualization
+
+jobs:
+  run-modules:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [data_load, data_quality_analysis, data_research, visualization]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # дивимось чи були зміни у файлах для якогось з модулів при пуші або пул реквесті
+      - name: Detect changed files for module
+        id: changes
+        if: ${{ github.event_name != 'workflow_dispatch' }}
+        uses: tj-actions/changed-files@v45
+        with:
+          files: |
+            src/${{ matrix.module }}.py
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          # щоб швидше ставились залежності
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run module
+        # workflow dispatch запускаємо або все, або вибраний модуль, при пулл-пуш реквесті, запускаємо модуль лише, якщо були якісь зміни
+        if: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.module == 'all' || github.event.inputs.module == matrix.module)) || (github.event_name != 'workflow_dispatch' && steps.changes.outputs.any_changed == 'true') }}
+        run: |
+          # Створюємо папку reports, бо твій код очікує її наявність
+          mkdir -p reports
+          echo "Running ${{ matrix.module }}"
+          
+          # Запускаємо модуль і зберігаємо лог прямо в корінь для перевірки
+          python -m src.${{ matrix.module }} > reports/${{ matrix.module }}_ci.log 2>&1
+
+      # перевіряємо чи взагалі є папка reports (бо якщо модуль скіпнувся, то папки може і не бути)
+      - name: Check reports dir
+        id: art
+        run: |
+          if [ -d "reports" ] && [ "$(ls -A reports)" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # завантажуємо результати в github Actions artifacts, щоб їх можна було скачати
+      - name: Upload artifacts
+        if: ${{ steps.art.outputs.exists == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          # називаємо артефакт відповідно до модуля, щоб не було каші
+          name: reports-${{ matrix.module }}
+          path: reports/
