@@ -26,13 +26,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Модулі, які лежать у папці src/
         module: [data_load, data_quality_analysis, data_research, visualization]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # дивимось чи були зміни у файлах для якогось з модулів при пуші або пул реквесті
+      # Дивимось чи були зміни у файлах для якогось з модулів у src/
       - name: Detect changed files for module
         id: changes
         if: ${{ github.event_name != 'workflow_dispatch' }}
@@ -45,45 +46,43 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          # щоб швидше ставились залежності
           cache: "pip"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Додаємо openpyxl, якщо ти читаєш Excel файли (.xlsx)
-          pip install openpyxl
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run module
-        # workflow dispatch запускаємо або все, або вибраний модуль, при пулл-пуш реквесті, запускаємо модуль лише, якщо були якісь зміни
+        # Запускаємо за умовою: або ручний вибір, або зміни у файлі модуля
         if: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.module == 'all' || github.event.inputs.module == matrix.module)) || (github.event_name != 'workflow_dispatch' && steps.changes.outputs.any_changed == 'true') }}
         run: |
-          # Створюємо необхідну структуру папок, щоб Python не впав з помилкою FileNotFoundError
+          # Створюємо необхідну структуру папок на Runner-і
           mkdir -p data/raw data/processed reports/figures artifacts/${{ matrix.module }}
           
-          echo "Running src.${{ matrix.module }}"
+          echo "Виконується: src.${{ matrix.module }}"
           
-          # Запускаємо модуль. Якщо він знову впаде, ти побачиш помилку в ci.log всередині артефактів
-          python -m src.${{ matrix.module }} > artifacts/${{ matrix.module }}/ci.log 2>&1
+          # Запуск модуля. Вивід логується прямо в консоль для дебагу, а також у файл
+          python -m src.${{ matrix.module }} 2>&1 | tee artifacts/${{ matrix.module }}/ci.log
 
-      # перевіряємо чи взагалі є папка artifacts/<module> (бо якщо модуль скіпнувся, то папки може і не бути)
-      - name: Check artifacts dir
+      - name: Check and Collect results
         id: art
         run: |
-          # Додатково копіюємо результати з reports у artifacts для завантаження
-          if [ -d "reports" ]; then cp -r reports/* artifacts/${{ matrix.module }}/ 2>/dev/null || true; fi
+          # Копіюємо графіки з reports, якщо вони були створені
+          if [ -d "reports/figures" ]; then 
+            cp -r reports/figures/* artifacts/${{ matrix.module }}/ 2>/dev/null || true
+          fi
           
+          # Перевірка чи папка не порожня
           if [ -d "artifacts/${{ matrix.module }}" ] && [ "$(ls -A artifacts/${{ matrix.module }})" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # завантажуємо результати в github Actions artifacts, щоб їх можна було скачати
       - name: Upload artifacts
         if: ${{ steps.art.outputs.exists == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: artifacts-${{ matrix.module }}
-          path: artifacts/${{ matrix.module }}
+          path: artifacts/${{ matrix.module }}/
