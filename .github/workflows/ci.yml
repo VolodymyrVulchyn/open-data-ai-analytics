@@ -32,7 +32,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # дивимось чи були зміни у файлах для якогось з модулів у папці src/
+      # дивимось чи були зміни у файлах для якогось з модулів при пуші або пул реквесті
       - name: Detect changed files for module
         id: changes
         if: ${{ github.event_name != 'workflow_dispatch' }}
@@ -45,31 +45,42 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          # щоб швидше ставились залежності
           cache: "pip"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # Додаємо openpyxl, якщо ти читаєш Excel файли (.xlsx)
+          pip install openpyxl
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run module
-        # workflow dispatch запускаємо або все, або вибраний модуль, при пулл-пуш реквесті, запускаємо модуль лише, якщо були зміни в src/
+        # workflow dispatch запускаємо або все, або вибраний модуль, при пулл-пуш реквесті, запускаємо модуль лише, якщо були якісь зміни
         if: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.module == 'all' || github.event.inputs.module == matrix.module)) || (github.event_name != 'workflow_dispatch' && steps.changes.outputs.any_changed == 'true') }}
         run: |
-          mkdir -p artifacts/${{ matrix.module }}
+          # Створюємо необхідну структуру папок, щоб Python не впав з помилкою FileNotFoundError
+          mkdir -p data/raw data/processed reports/figures artifacts/${{ matrix.module }}
+          
           echo "Running src.${{ matrix.module }}"
-          # Додаємо src., щоб пайтон знайшов модуль у папці src
+          
+          # Запускаємо модуль. Якщо він знову впаде, ти побачиш помилку в ci.log всередині артефактів
           python -m src.${{ matrix.module }} > artifacts/${{ matrix.module }}/ci.log 2>&1
 
+      # перевіряємо чи взагалі є папка artifacts/<module> (бо якщо модуль скіпнувся, то папки може і не бути)
       - name: Check artifacts dir
         id: art
         run: |
+          # Додатково копіюємо результати з reports у artifacts для завантаження
+          if [ -d "reports" ]; then cp -r reports/* artifacts/${{ matrix.module }}/ 2>/dev/null || true; fi
+          
           if [ -d "artifacts/${{ matrix.module }}" ] && [ "$(ls -A artifacts/${{ matrix.module }})" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # завантажуємо результати в github Actions artifacts, щоб їх можна було скачати
       - name: Upload artifacts
         if: ${{ steps.art.outputs.exists == 'true' }}
         uses: actions/upload-artifact@v4
