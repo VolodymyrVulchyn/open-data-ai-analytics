@@ -3,7 +3,7 @@ __pycache__/
 .ipynb_checkpoints/
 .venv/
 .env
-data/raw/
+#data/raw/
 data/processed/
 .idea/
 .DS_Store
