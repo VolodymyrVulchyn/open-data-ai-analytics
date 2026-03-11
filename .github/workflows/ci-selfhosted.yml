@@ -1,0 +1,59 @@
+name: CI (self-hosted)
+
+on:
+  workflow_dispatch:
+    inputs:
+      module:
+        description: "Який модуль запустити на моєму маку?"
+        required: true
+        default: "data_load"
+        type: choice
+        options:
+          - data_load
+          - data_quality_analysis
+          - data_research
+          - visualization
+
+jobs:
+  run-on-local:
+    # вказую запуск на моєму підключеному макбуці (локально)
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Check local environment
+        run: |
+          echo "Користувач: $(whoami)"
+          echo "Система: $(uname -a)"
+          echo "Процесор: $(sysctl -n machdep.cpu.brand_string)"
+          python3 --version
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then python3 -m pip install -r requirements.txt; fi
+
+      # запускаю модуль через пакет src. і зберігаємо лог
+      - name: Run module on MacBook
+        run: |
+          # Створюємо необхідні папки, якщо їх немає
+          mkdir -p artifacts/${{ github.event.inputs.module }}
+          mkdir -p reports/figures
+          
+          echo "Запуск модуля src.${{ github.event.inputs.module }}..."
+          
+          # Пакетний запуск із перенаправленням виводу в лог
+          python3 -m src.${{ github.event.inputs.module }} > artifacts/${{ github.event.inputs.module }}/selfhosted.log 2>&1
+          
+          # Копіюємо графіки з reports у artifacts для завантаження на GitHub
+          if [ -d "reports" ]; then 
+            cp -r reports/* artifacts/${{ github.event.inputs.module }}/ 2>/dev/null || true 
+          fi
+
+      # завантажую результати, щоб вони з'явилися на сайті GitHub
+      - name: Upload local results
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-macOS-${{ github.event.inputs.module }}
+          path: artifacts/${{ github.event.inputs.module }}/
