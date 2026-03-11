@@ -32,7 +32,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # дивимось чи були зміни у файлах для якогось з модулів при пуші або пул реквесті
+      # дивимось чи були зміни у файлах для якогось з модулів у папці src/
       - name: Detect changed files for module
         id: changes
         if: ${{ github.event_name != 'workflow_dispatch' }}
@@ -45,7 +45,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          # щоб швидше ставились залежності
           cache: "pip"
 
       - name: Install dependencies
@@ -54,31 +53,26 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run module
-        # workflow dispatch запускаємо або все, або вибраний модуль, при пулл-пуш реквесті, запускаємо модуль лише, якщо були якісь зміни
+        # workflow dispatch запускаємо або все, або вибраний модуль, при пулл-пуш реквесті, запускаємо модуль лише, якщо були зміни в src/
         if: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.module == 'all' || github.event.inputs.module == matrix.module)) || (github.event_name != 'workflow_dispatch' && steps.changes.outputs.any_changed == 'true') }}
         run: |
-          # Створюємо папку reports, бо твій код очікує її наявність
-          mkdir -p reports
-          echo "Running ${{ matrix.module }}"
-          
-          # Запускаємо модуль і зберігаємо лог прямо в корінь для перевірки
-          python -m src.${{ matrix.module }} > reports/${{ matrix.module }}_ci.log 2>&1
+          mkdir -p artifacts/${{ matrix.module }}
+          echo "Running src.${{ matrix.module }}"
+          # Додаємо src., щоб пайтон знайшов модуль у папці src
+          python -m src.${{ matrix.module }} > artifacts/${{ matrix.module }}/ci.log 2>&1
 
-      # перевіряємо чи взагалі є папка reports (бо якщо модуль скіпнувся, то папки може і не бути)
-      - name: Check reports dir
+      - name: Check artifacts dir
         id: art
         run: |
-          if [ -d "reports" ] && [ "$(ls -A reports)" ]; then
+          if [ -d "artifacts/${{ matrix.module }}" ] && [ "$(ls -A artifacts/${{ matrix.module }})" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # завантажуємо результати в github Actions artifacts, щоб їх можна було скачати
       - name: Upload artifacts
         if: ${{ steps.art.outputs.exists == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          # називаємо артефакт відповідно до модуля, щоб не було каші
-          name: reports-${{ matrix.module }}
-          path: reports/
+          name: artifacts-${{ matrix.module }}
+          path: artifacts/${{ matrix.module }}
