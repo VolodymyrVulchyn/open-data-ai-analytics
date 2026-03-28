@@ -1,35 +1,72 @@
+import os
+import sqlite3
+from pathlib import Path
+
 import pandas as pd
 
+DB_PATH = os.getenv("DB_PATH", "/app/storage/open_data.db")
+TABLE_NAME = os.getenv("TABLE_NAME", "open_data_table")
+REPORT_PATH = Path("/app/reports/data_research_report.txt")
 
-# завантажуємо оброблені дані (вони вже підготовлені модулем data_load)
-df = pd.read_csv("data/processed/population_change_regions.csv")
 
-print("Дослідження даних")
+def load_data_from_db(db_path: str, table_name: str) -> pd.DataFrame:
+    conn = sqlite3.connect(db_path)
+    try:
+        df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
+    finally:
+        conn.close()
 
-# шукаємо регіони з найбільшим скороченням населення та робимо суму total_change по кожному регіону
-region_total = df.groupby("region")["total_change"].sum().sort_values()
+    df["period"] = pd.to_datetime(df["period"], errors="coerce")
+    return df
 
-print("\n5 регіонів з найбільшим скороченням (total_change):")
-print(region_total.head(5))
 
-# порівнюємо вплив природного та міграційного факторів
-natural_sum = df["natural_change"].sum()
-migration_sum = df["migration_change"].sum()
+def build_report(df: pd.DataFrame) -> str:
+    top_regions = (
+        df.groupby("region")["total_change"]
+        .sum()
+        .sort_values()
+        .head(5)
+    )
 
-print("\nСума natural_change (природний фактор):", natural_sum)
-print("Сума migration_change (міграційний фактор):", migration_sum)
+    natural_sum = df["natural_change"].sum()
+    migration_sum = df["migration_change"].sum()
 
-# перевіряємо, чи змінилась динаміка після 2022 року і period переводимо у дату (інколи pandas читає як текст)
-df["period"] = pd.to_datetime(df["period"], errors="coerce")
+    before_2022 = df[df["period"] < "2022-01-01"]["total_change"].mean()
+    after_2022 = df[df["period"] >= "2022-01-01"]["total_change"].mean()
 
-avg_before_2022 = df[df["period"] < "2022-01-01"]["total_change"].mean()
-avg_after_2022 = df[df["period"] >= "2022-01-01"]["total_change"].mean()
+    if pd.notna(before_2022) and pd.notna(after_2022):
+        if after_2022 < before_2022:
+            conclusion = "Після 2022 року середній показник став нижчий (скорочення посилилось)."
+        else:
+            conclusion = "Після 2022 року середній показник не знизився."
+    else:
+        conclusion = "Недостатньо даних для порівняння періодів."
 
-print("\nСереднє total_change до 2022:", avg_before_2022)
-print("Середнє total_change після 2022:", avg_after_2022)
+    report = []
+    report.append("Дослідження даних")
+    report.append("")
+    report.append("5 регіонів з найбільшим скороченням (total_change):")
+    report.append(top_regions.to_string())
+    report.append("")
+    report.append(f"Сума natural_change (природний фактор): {natural_sum}")
+    report.append(f"Сума migration_change (міграційний фактор): {migration_sum}")
+    report.append("")
+    report.append(f"Середнє total_change до 2022: {before_2022}")
+    report.append(f"Середнє total_change після 2022: {after_2022}")
+    report.append("")
+    report.append(conclusion)
 
-if avg_after_2022 < avg_before_2022:
-    print("\nПісля 2022 року середній показник став нижчий (скорочення посилилось).")
-else:
-    print("\nПісля 2022 року середній показник не став нижчим або змінився незначно.")
+    return "\n".join(report)
 
+
+def save_report(report_text: str, report_path: Path) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(report_text, encoding="utf-8")
+
+
+if __name__ == "__main__":
+    df = load_data_from_db(DB_PATH, TABLE_NAME)
+    report_text = build_report(df)
+    save_report(report_text, REPORT_PATH)
+    print(report_text)
+    print(f"\nЗвіт збережено: {REPORT_PATH}")
