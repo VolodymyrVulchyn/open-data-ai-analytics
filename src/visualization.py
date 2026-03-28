@@ -1,51 +1,69 @@
 import os
-import pandas as pd
+import sqlite3
+from pathlib import Path
+
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import pandas as pd
+
+DB_PATH = os.getenv("DB_PATH", "/app/storage/open_data.db")
+TABLE_NAME = os.getenv("TABLE_NAME", "open_data_table")
+FIGURES_DIR = Path("/app/reports/figures")
 
 
-# шлях до вже оброблених даних
-DATA_PATH = "data/processed/population_change_regions.csv"
+def load_data_from_db(db_path: str, table_name: str) -> pd.DataFrame:
+    conn = sqlite3.connect(db_path)
+    try:
+        df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
+    finally:
+        conn.close()
 
-# папка для збереження графіків
-FIG_DIR = "reports/figures"
-
-os.makedirs(FIG_DIR, exist_ok=True)
-df = pd.read_csv(DATA_PATH)
-
-print("Візуалізація даних")
+    df["period"] = pd.to_datetime(df["period"], errors="coerce")
+    return df
 
 
-# топ-10 регіонів за найбільшим скороченням населення (total_change)
-region_total = df.groupby("region")["total_change"].sum().sort_values()
+def plot_regions_total_change(df: pd.DataFrame, output_path: Path) -> None:
+    data = (
+        df.groupby("region")["total_change"]
+        .sum()
+        .sort_values()
+        .head(10)
+    )
 
-top20 = region_total.head(20)
+    plt.figure(figsize=(10, 6))
+    data.plot(kind="barh")
+    plt.title("10 регіонів з найбільшим скороченням населення")
+    plt.xlabel("Сумарний total_change")
+    plt.ylabel("Регіон")
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
 
-plt.figure()
-top20.plot(kind="bar")
-plt.title("Топ-20 регіонів з найбільшим скороченням населення")
-plt.xlabel("Регіон")
-plt.ylabel("Сума total_change")
-plt.tight_layout()
 
-out1 = os.path.join(FIG_DIR, "regions_total_change.png")
-plt.savefig(out1, dpi=200)
-plt.close()
+def plot_natural_vs_migration(df: pd.DataFrame, output_path: Path) -> None:
+    natural_sum = df["natural_change"].sum()
+    migration_sum = df["migration_change"].sum()
 
-print("Збережено графік:", out1)
+    plt.figure(figsize=(8, 5))
+    plt.bar(["natural_change", "migration_change"], [natural_sum, migration_sum])
+    plt.title("Порівняння природного та міграційного факторів")
+    plt.ylabel("Сума змін")
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
 
-# порівняння природного та міграційного факторів (сума по всіх записах)
-natural_sum = df["natural_change"].sum()
-migration_sum = df["migration_change"].sum()
 
-plt.figure()
-plt.bar(["natural_change", "migration_change"], [natural_sum, migration_sum])
-plt.title("Порівняння природного та міграційного факторів")
-plt.xlabel("Показник")
-plt.ylabel("Сума значень")
-plt.tight_layout()
+if __name__ == "__main__":
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
-out2 = os.path.join(FIG_DIR, "natural_vs_migration.png")
-plt.savefig(out2, dpi=200)
-plt.close()
-# пулл ріквест тест
-print("Збережено графік:", out2)
+    df = load_data_from_db(DB_PATH, TABLE_NAME)
+
+    fig1 = FIGURES_DIR / "regions_total_change.png"
+    fig2 = FIGURES_DIR / "natural_vs_migration.png"
+
+    plot_regions_total_change(df, fig1)
+    print(f"Збережено графік: {fig1}")
+
+    plot_natural_vs_migration(df, fig2)
+    print(f"Збережено графік: {fig2}")

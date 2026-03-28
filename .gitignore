@@ -1,10 +1,15 @@
-__pycache__/
-*.pyc
-.ipynb_checkpoints/
-.venv/
-.env
-#data/raw/
-data/processed/
 .idea/
 .DS_Store
 actions-runner/
+# data/raw/
+data/processed/
+storage/
+*.db
+*.sqlite3
+reports/*.txt
+reports/figures/
+plots/
+.venv/
+.pyc
+__pycache__
+
