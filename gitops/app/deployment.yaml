@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open-data-web
+  namespace: open-data-app
+  labels:
+    app: open-data-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: open-data-web
+  template:
+    metadata:
+      labels:
+        app: open-data-web
+    spec:
+      containers:
+        - name: open-data-web
+          image: nginx:latest
+          ports:
+            - containerPort: 80
