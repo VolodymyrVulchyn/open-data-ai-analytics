@@ -4,7 +4,7 @@
 
 Метою даного проєкту є дослідження демографічних змін в Україні на основі відкритих державних даних, а також практичне застосування інструментів аналізу даних, моделювання та системи контролю версій Git.
 
-У межах лабораторної роботи реалізується модульна структура проєкту, що включає завантаження даних, перевірку їх якості, дослідження та візуалізацію результатів.
+У межах лабораторної роботи реалізується модульна структура проєкту, що включає завантаження даних, перевірку їх якості, дослідження, візуалізацію результатів, хмарне розгортання, моніторинг та GitOps-розгортання у Kubernetes.
 
 ---
 
@@ -43,6 +43,13 @@ open-data-ai-analytics/
 │   ├── prometheus/
 │   │   └── prometheus.yml
 │   └── docker-compose.monitoring.yml
+├── gitops/
+│   ├── app/
+│   │   ├── namespace.yaml
+│   │   ├── deployment.yaml
+│   │   └── service.yaml
+│   └── argocd/
+│       └── application.yaml
 └── infra/
     └── terraform/
         ├── main.tf
@@ -59,6 +66,7 @@ open-data-ai-analytics/
 - `visualization` — побудова графіків;
 - `web` — веб-інтерфейс для перегляду результатів;
 - `monitoring` — конфігурація моніторингу Prometheus та Grafana;
+- `gitops` — Kubernetes YAML-файли та Argo CD Application для GitOps-розгортання;
 - `infra/terraform` — Terraform-конфігурація для розгортання проєкту в Microsoft Azure.
 
 ---
@@ -116,39 +124,38 @@ cloud-init.yaml  # автоматичне налаштування Linux VM
 
 1. Відкрити Azure Portal.
 2. Запустити Azure Cloud Shell.
-3. Обрати режим Bash або PowerShell.
-4. Клонувати репозиторій:
+3. Клонувати репозиторій:
 
 ```bash
 git clone https://github.com/VolodymyrVulchyn/open-data-ai-analytics.git
 ```
 
-5. Перейти до директорії Terraform:
+4. Перейти до директорії Terraform:
 
 ```bash
 cd open-data-ai-analytics/infra/terraform
 ```
 
-6. Ініціалізувати Terraform:
+5. Ініціалізувати Terraform:
 
 ```bash
 terraform init
 ```
 
-7. Відформатувати та перевірити конфігурацію:
+6. Відформатувати та перевірити конфігурацію:
 
 ```bash
 terraform fmt
 terraform validate
 ```
 
-8. Переглянути план створення ресурсів:
+7. Переглянути план створення ресурсів:
 
 ```bash
 terraform plan
 ```
 
-9. Створити інфраструктуру:
+8. Створити інфраструктуру:
 
 ```bash
 terraform apply
@@ -177,7 +184,11 @@ Terraform-конфігурація створює такі ресурси Micros
 Network Security Group використовується для відкриття необхідних портів:
 
 - `22` — SSH-підключення до Linux VM;
-- `8000` — доступ до веб-інтерфейсу Docker-проєкту.
+- `8000` — доступ до веб-інтерфейсу Docker-проєкту;
+- `30080` — доступ до застосунку, розгорнутого в Kubernetes через NodePort;
+- `30443` — доступ до веб-інтерфейсу Argo CD;
+- `9090` — доступ до Prometheus;
+- `3000` — доступ до Grafana.
 
 ---
 
@@ -243,14 +254,6 @@ cd /open-data-ai-analytics
 sudo docker ps -a
 ```
 
-Статус `Exited (0)` для модулів обробки означає, що контейнер успішно виконав свою задачу і завершив роботу без помилки.
-
-Перевірити, що веб-сервіс слухає порт `8000`:
-
-```bash
-sudo ss -tulpn | grep 8000
-```
-
 Перевірити HTTP-відповідь з VM:
 
 ```bash
@@ -267,15 +270,13 @@ http://PUBLIC_IP:8000
 
 ## Перевірка Network Security Group
 
-Якщо веб-інтерфейс не відкривається через public IP, потрібно перевірити правила Network Security Group:
+Якщо веб-інтерфейс або інші сервіси не відкриваються через public IP, потрібно перевірити правила Network Security Group:
 
 ```bash
 az network nsg rule list --resource-group rg-open-data-lab4 --nsg-name nsg-open-data-lab4 --output table
 ```
 
-У списку має бути правило для порту `8000`.
-
-Якщо його немає, можна додати вручну:
+Приклад додавання правила для порту `8000`:
 
 ```bash
 az network nsg rule create \
@@ -380,12 +381,6 @@ monitoring_cadvisor
 - `8000` — веб-інтерфейс основного проєкту;
 - `22` — SSH-підключення до VM.
 
-Перевірити правила NSG можна командою:
-
-```bash
-az network nsg rule list --resource-group rg-open-data-lab4 --nsg-name nsg-open-data-lab4 --output table
-```
-
 Якщо правила для Prometheus і Grafana відсутні, їх можна додати командами:
 
 ```bash
@@ -393,7 +388,7 @@ az network nsg rule create \
   --resource-group rg-open-data-lab4 \
   --nsg-name nsg-open-data-lab4 \
   --name Allow-Prometheus-9090 \
-  --priority 1005 \
+  --priority 1012 \
   --direction Inbound \
   --access Allow \
   --protocol Tcp \
@@ -408,7 +403,7 @@ az network nsg rule create \
   --resource-group rg-open-data-lab4 \
   --nsg-name nsg-open-data-lab4 \
   --name Allow-Grafana-3000 \
-  --priority 1006 \
+  --priority 1013 \
   --direction Inbound \
   --access Allow \
   --protocol Tcp \
@@ -426,12 +421,6 @@ Prometheus відкривається у браузері за адресою:
 
 ```text
 http://PUBLIC_IP:9090
-```
-
-Для поточної лабораторної роботи використовувалась адреса:
-
-```text
-http://20.107.23.57:9090
 ```
 
 Сторінка targets доступна за адресою:
@@ -456,12 +445,6 @@ Grafana відкривається у браузері за адресою:
 
 ```text
 http://PUBLIC_IP:3000
-```
-
-Для поточної лабораторної роботи використовувалась адреса:
-
-```text
-http://20.107.23.57:3000
 ```
 
 Дані для входу:
@@ -518,19 +501,13 @@ ID dashboard:
 
 Метрики Docker-контейнерів збираються через cAdvisor. Їх можна перевірити у Prometheus за допомогою таких PromQL-запитів:
 
-Використання пам’яті контейнерами:
-
 ```promql
 container_memory_usage_bytes
 ```
 
-Використання CPU контейнерами:
-
 ```promql
 rate(container_cpu_usage_seconds_total[5m])
 ```
-
-Кількість контейнерів, які бачить cAdvisor:
 
 ```promql
 count(container_last_seen)
@@ -538,28 +515,362 @@ count(container_last_seen)
 
 ---
 
-## Короткий набір команд для запуску моніторингу
+## GitOps-розгортання за допомогою k3s та Argo CD
+
+У межах лабораторної роботи було реалізовано GitOps-підхід для автоматизованого розгортання застосунку в Kubernetes-середовище. Для цього на Azure Linux VM було встановлено k3s, а як GitOps-інструмент використано Argo CD.
+
+GitOps означає, що бажаний стан застосунку описується у GitHub-репозиторії, а Argo CD автоматично синхронізує Kubernetes-кластер із цим станом. Усі зміни виконуються через commit і push у Git, після чого Argo CD застосовує їх до кластера.
+
+---
+
+## Структура GitOps-директорії
+
+GitOps-конфігурація розміщена в директорії:
+
+```text
+gitops/
+```
+
+Структура:
+
+```text
+gitops/
+├── app/
+│   ├── namespace.yaml
+│   ├── deployment.yaml
+│   └── service.yaml
+└── argocd/
+    └── application.yaml
+```
+
+Призначення файлів:
+
+- `gitops/app/namespace.yaml` — створює namespace `open-data-app`;
+- `gitops/app/deployment.yaml` — описує Deployment застосунку `open-data-web`;
+- `gitops/app/service.yaml` — створює Service типу NodePort для доступу до застосунку;
+- `gitops/argocd/application.yaml` — описує Argo CD Application, який підключає GitHub-репозиторій до Kubernetes-кластера.
+
+---
+
+## Встановлення k3s на Azure VM
+
+Для встановлення k3s потрібно підключитися до Azure VM:
+
+```bash
+ssh -i lab4_vm_key.pem azureuser@PUBLIC_IP
+```
+
+Після цього можна встановити k3s:
+
+```bash
+curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable traefik --write-kubeconfig-mode 644" sh -
+```
+
+Перевірка роботи Kubernetes-кластера:
+
+```bash
+sudo kubectl get nodes
+```
+
+Очікуваний результат:
+
+```text
+vm-open-data-lab4   Ready   control-plane   ...
+```
+
+---
+
+## Встановлення Argo CD
+
+Створити namespace для Argo CD:
+
+```bash
+sudo kubectl create namespace argocd
+```
+
+Завантажити manifest встановлення Argo CD:
+
+```bash
+curl -L https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml -o argocd-install.yaml
+```
+
+Встановити Argo CD:
+
+```bash
+sudo kubectl apply -n argocd -f argocd-install.yaml --validate=false
+```
+
+Якщо під час встановлення виникає помилка з `metadata.annotations: Too long`, manifest можна застосувати через server-side apply:
+
+```bash
+sudo kubectl apply --server-side --force-conflicts -n argocd -f argocd-install.yaml --validate=false
+```
+
+Перевірити pod-и Argo CD:
+
+```bash
+sudo kubectl get pods -n argocd
+```
+
+Усі основні pod-и мають перейти у стан `Running`.
+
+---
+
+## Доступ до Argo CD
+
+Для доступу до Argo CD через браузер створюється Service типу NodePort:
+
+```bash
+cat <<EOF | sudo kubectl apply -f -
+apiVersion: v1
+kind: Service
+metadata:
+  name: argocd-server-nodeport
+  namespace: argocd
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: argocd-server
+  ports:
+    - name: https
+      port: 443
+      targetPort: 8080
+      nodePort: 30443
+EOF
+```
+
+Argo CD відкривається у браузері:
+
+```text
+https://PUBLIC_IP:30443
+```
+
+Отримати початковий пароль адміністратора:
+
+```bash
+sudo kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo
+```
+
+Дані для входу:
+
+```text
+login: admin
+password: пароль із команди
+```
+
+---
+
+## Підключення GitHub-репозиторію до Argo CD
+
+Argo CD Application описано у файлі:
+
+```text
+gitops/argocd/application.yaml
+```
+
+Застосувати його можна командою:
+
+```bash
+cd /open-data-ai-analytics
+sudo kubectl apply -f gitops/argocd/application.yaml
+```
+
+Перевірити Application:
+
+```bash
+sudo kubectl get applications -n argocd
+```
+
+Очікуваний стан:
+
+```text
+open-data-web   Synced   Healthy
+```
+
+---
+
+## Перевірка Kubernetes-ресурсів
+
+Після синхронізації Argo CD можна перевірити створені ресурси:
+
+```bash
+sudo kubectl get all -n open-data-app
+```
+
+Або окремо:
+
+```bash
+sudo kubectl get pods -n open-data-app
+sudo kubectl get deployment -n open-data-app
+sudo kubectl get svc -n open-data-app
+```
+
+Очікувано має бути:
+
+```text
+pod/open-data-web-...              Running
+deployment.apps/open-data-web      1/1
+service/open-data-web-service      NodePort 80:30080/TCP
+```
+
+---
+
+## Доступ до GitOps-застосунку
+
+Застосунок, розгорнутий через Argo CD, відкривається через NodePort:
+
+```text
+http://PUBLIC_IP:30080
+```
+
+У демонстраційному варіанті використовується образ `nginx:latest`, тому при відкритті адреси відображається стандартна сторінка `Welcome to nginx!`.
+
+---
+
+## Демонстрація автоматичного оновлення
+
+Для перевірки автоматичного оновлення потрібно змінити файл:
+
+```text
+gitops/app/deployment.yaml
+```
+
+Наприклад, змінити кількість реплік:
+
+```yaml
+replicas: 1
+```
+
+на:
+
+```yaml
+replicas: 2
+```
+
+Після цього виконати commit і push у GitHub.
+
+Перевірити результат на VM:
+
+```bash
+sudo kubectl get deployment -n open-data-app
+sudo kubectl get pods -n open-data-app
+```
+
+Очікуваний результат:
+
+```text
+open-data-web   2/2
+```
+
+і два pod-и застосунку `open-data-web`.
+
+Також у веб-інтерфейсі Argo CD застосунок має залишатися у стані:
+
+```text
+Synced / Healthy
+```
+
+---
+
+## Демонстрація rollback
+
+Для rollback потрібно повернути попередній стан у GitHub-репозиторії. Наприклад, змінити:
+
+```yaml
+replicas: 2
+```
+
+назад на:
+
+```yaml
+replicas: 1
+```
+
+Після цього виконати commit і push.
+
+Перевірити результат:
+
+```bash
+sudo kubectl get deployment -n open-data-app
+sudo kubectl get pods -n open-data-app
+```
+
+Очікуваний результат:
+
+```text
+open-data-web   1/1
+```
+
+і один pod застосунку.
+
+---
+
+## Перевірка сумісності GitOps із моніторингом
+
+Після GitOps-розгортання можна повторно запустити моніторинговий стек:
+
+```bash
+cd /open-data-ai-analytics/monitoring
+sudo docker-compose -f docker-compose.monitoring.yml up -d
+sudo docker ps -a
+```
+
+Після цього мають працювати контейнери:
+
+```text
+monitoring_prometheus
+monitoring_grafana
+monitoring_node_exporter
+monitoring_cadvisor
+```
+
+Prometheus можна перевірити локально на VM:
+
+```bash
+curl http://localhost:9090
+```
+
+Grafana і Prometheus доступні через браузер:
+
+```text
+http://PUBLIC_IP:3000
+http://PUBLIC_IP:9090
+```
+
+Застосунок, розгорнутий через Argo CD, залишається доступним через:
+
+```text
+http://PUBLIC_IP:30080
+```
+
+---
+
+## Короткий набір команд для запуску GitOps
 
 ```bash
 ssh -i lab4_vm_key.pem azureuser@PUBLIC_IP
 
+curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable traefik --write-kubeconfig-mode 644" sh -
+
+sudo kubectl get nodes
+
+sudo kubectl create namespace argocd
+
+curl -L https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml -o argocd-install.yaml
+
+sudo kubectl apply -n argocd -f argocd-install.yaml --validate=false
+
+sudo kubectl apply --server-side --force-conflicts -n argocd -f argocd-install.yaml --validate=false
+
+sudo kubectl get pods -n argocd
+
 cd /open-data-ai-analytics
 
-sudo docker-compose up -d --build
+sudo kubectl apply -f gitops/argocd/application.yaml
 
-cd monitoring
+sudo kubectl get applications -n argocd
 
-sudo docker-compose -f docker-compose.monitoring.yml up -d
-
-sudo docker ps -a
-```
-
-Після цього у браузері можна відкрити:
-
-```text
-http://PUBLIC_IP:8000  - веб-інтерфейс проєкту
-http://PUBLIC_IP:9090  - Prometheus
-http://PUBLIC_IP:3000  - Grafana
+sudo kubectl get all -n open-data-app
 ```
 
 ---
